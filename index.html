@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Password Generator — PWA (Fixed Order)</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="theme-color" content="#111827" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    :root { color-scheme: light dark; --bg:#0b0e13; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --primary:#2563eb; --ok:#16a34a; --warn:#d97706; --shadow:0 10px 30px rgba(0,0,0,0.25); }
+    @media (prefers-color-scheme: light){ :root{ --bg:#f7f7fb; --card:#fff; --text:#1f2937; --muted:#6b7280; --shadow:0 10px 30px rgba(0,0,0,0.08);} }
+    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:grid; place-items:center; padding:16px; }
+    .container{ width:100%; max-width:680px; background:var(--card); border-radius:16px; box-shadow:var(--shadow); padding:20px; }
+    h1{ font-size:1.2rem; margin:0 0 6px; }
+    p.sub{ margin:0 0 12px; color:var(--muted); }
+    .card{ border:1px solid rgba(128,128,128,0.2); border-radius:12px; padding:12px; margin-top:12px; }
+    .row{ display:grid; grid-template-columns:1fr; gap:10px; margin-top:10px; }
+    .pass-box{ display:flex; gap:8px; align-items:stretch; }
+    input[type=text]{ flex:1; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:1.05rem; letter-spacing:0.02em; padding:10px; border-radius:10px; border:1px solid rgba(128,128,128,0.3); background:transparent; color:inherit; }
+    .btn{ border:none; border-radius:10px; padding:10px 14px; font-size:1rem; cursor:pointer; background:var(--primary); color:#fff; }
+    .btn.secondary{ background:#4b5563; }
+    .small{ color:var(--muted); font-size:0.9rem; }
+    .badge{ display:inline-block; padding:4px 8px; border-radius:999px; font-weight:600; }
+    .badge.ok{ background:rgba(22,163,74,0.15); color:var(--ok); }
+    .badge.warn{ background:rgba(217,119,6,0.15); color:var(--warn); }
+    .policy{ font-size:0.95rem; }
+    .meta{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .len-picker{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .len-picker label{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+    .footer{ margin-top:8px; color:var(--muted); font-size:0.85rem; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Password Generator</h1>
+    <p class="sub policy">Fixed ordering: <strong>letters</strong> (two truncated words, with exactly one uppercase) + <strong>digit</strong> + <strong>symbol</strong> (from <code>*+-=?!@$</code>). Length: <strong>8</strong>, <strong>12</strong>, or <strong>15</strong>.</p>
+
+    <div class="card">
+      <div class="len-picker small" role="radiogroup" aria-label="Password length">
+        <span>Length:</span>
+        <label><input type="radio" name="len" value="8" /> 8</label>
+        <label><input type="radio" name="len" value="12" checked /> 12</label>
+        <label><input type="radio" name="len" value="15" /> 15</label>
+      </div>
+
+      <div class="row">
+        <div class="pass-box">
+          <input id="password" type="text" readonly aria-label="Generated password" />
+          <button id="regen" class="btn" title="Generate">Generate</button>
+          <button id="copy" class="btn secondary" title="Copy">Copy</button>
+        </div>
+        <div class="meta">
+          <span id="entropy" class="small"></span>
+          <span id="strength" class="badge ok"></span>
+        </div>
+        <div id="explain" class="small"></div>
+      </div>
+    </div>
+
+    <div class="footer">Privacy: Everything runs locally with <strong>crypto.getRandomValues()</strong>; nothing is sent anywhere.</div>
+  </main>
+
+  <script>
+    const SYMBOLS = "*+-=?!@$";
+    const DIGITS = "0123456789";
+    const WORDS = [
+      "apple","baker","cabin","delta","eagle","forest","garden","harbor","island","jungle",
+      "karma","lemon","mango","nectar","ocean","panda","quartz","rocket","saturn","tango",
+      "umbra","velvet","willow","xenon","yodel","zesty","anchor","beacon","canyon","dynamo",
+      "ember","fable","gizmo","harvest","indigo","juniper","kepler","lagoon","meteor","nylon",
+      "onyx","prairie","quiver","radar","sonar","thrive","utopia","valley","wharf","zephyr",
+      "alpha","bravo","camel","drift","flame","globe","hazel","ivory","jolly",
+      "kelpy","lilac","maple","noble","orbit","petal","quill","raven","sable","terra",
+      "urban","vivid","wrist","xylem","yacht","zebra","atlas","breeze","coral","daisy",
+      "easel","frost","grove","honey","iris","jewel","linen","meadow",
+      "olive","pearl","river","sunny","trail","vista","wheat","zinnia"
+    ];
+
+    function randInt(max){ const a=new Uint32Array(1); crypto.getRandomValues(a); return a[0]%max; }
+    function pick(str){ return str[randInt(str.length)]; }
+    function pickWord(){ return WORDS[randInt(WORDS.length)]; }
+    function differentWord(w){ let w2=pickWord(); if(w2===w) w2=pickWord(); return w2; }
+
+    function chooseSplit(w1,w2,L){
+      const lettersCount=L-2; // reserve space for digit+symbol at the end
+      const valid=[]; const maxA=Math.min(w1.length, lettersCount-1);
+      for(let a=1;a<=maxA;a++){ const b=lettersCount-a; if(b>=1 && b<=w2.length) valid.push([a,b]); }
+      if(valid.length===0){ const a=Math.max(1, Math.min(w1.length, lettersCount-1)); const b=Math.max(1, Math.min(w2.length, lettersCount-a)); return [a,b]; }
+      return valid[randInt(valid.length)];
+    }
+
+    function buildPassword(L){
+      let w1=pickWord(); let w2=differentWord(w1);
+      const [a,b]=chooseSplit(w1,w2,L);
+      let letters=w1.slice(0,a)+w2.slice(0,b);
+      const upIdx=randInt(letters.length);
+      letters=letters.slice(0,upIdx)+letters[upIdx].toUpperCase()+letters.slice(upIdx+1);
+      const digit=pick(DIGITS);
+      const symbol=pick(SYMBOLS);
+      const password = letters + digit + symbol; // fixed ordering
+      // Validate
+      if(!/[A-Z]/.test(password)) return buildPassword(L);
+      if(!/[0-9]/.test(password)) return buildPassword(L);
+      if(!/[*+\-=\?!@\$]/.test(password)) return buildPassword(L);
+      return password;
+    }
+
+    function estimateEntropy(L){
+      // Fixed order removes placement permutations.
+      // Space ≈ (W*(W-1)) * (lettersCount) * 10 * SYMBOLS.length
+      const W=WORDS.length; const lettersCount=L-2;
+      const space=(W*(W-1)) * lettersCount * 10 * SYMBOLS.length;
+      return Math.log2(space);
+    }
+
+    function getSelectedLength(){ const radios=document.querySelectorAll('input[name="len"]'); for(const r of radios){ if(r.checked) return parseInt(r.value,10);} return 12; }
+
+    function updateUI(pw,L){
+      document.getElementById('password').value=pw;
+      const bits=estimateEntropy(L);
+      document.getElementById('entropy').textContent=`Estimated entropy: ${bits.toFixed(1)} bits • Length: ${L}`;
+      const s=document.getElementById('strength');
+      if(bits>=80){ s.className='badge ok'; s.textContent='Good'; }
+      else if(bits>=60){ s.className='badge warn'; s.textContent='Fair'; }
+      else { s.className='badge warn'; s.textContent='Basic'; }
+      document.getElementById('explain').innerHTML=`Order: <code>letters + digit + symbol</code>. Letters are two truncated words with <strong>exactly one uppercase</strong>; symbol from <code>${SYMBOLS}</code>.`;
+    }
+
+    async function copyToClipboard(){ const val=document.getElementById('password').value; if(!val) return; try{ await navigator.clipboard.writeText(val); flashButton('copy'); } catch{ const field=document.getElementById('password'); field.select(); field.setSelectionRange(0, 99999); document.execCommand('copy'); flashButton('copy'); } }
+    function flashButton(id){ const btn=document.getElementById(id); const old=btn.textContent; btn.textContent='Copied!'; setTimeout(()=>btn.textContent=old,1200); }
+    function generate(){ const L=getSelectedLength(); const pw=buildPassword(L); updateUI(pw,L); }
+
+    document.getElementById('regen').addEventListener('click', generate);
+    document.getElementById('copy').addEventListener('click', copyToClipboard);
+    document.querySelectorAll('input[name="len"]').forEach(r=>r.addEventListener('change', generate));
+
+    if('serviceWorker' in navigator){ window.addEventListener('load', ()=>{ navigator.serviceWorker.register('./service-worker.js').catch(console.error); }); }
+    generate();
+  </script>
+</body>
+</html>
